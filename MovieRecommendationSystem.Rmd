@@ -16,8 +16,8 @@ library(recommenderlab)
 ```{r}
 # Reading the 2 datasets needed for this project in to R
 
-ratings <- read.csv('/Users/josephryan/Desktop/R projects/Movie Recommendation /ratings.csv')
-movies <- read.csv('/Users/josephryan/Desktop/R projects/Movie Recommendation /movies.csv', stringsAsFactors = FALSE)
+ratings <- read.csv('ratings.csv')
+movies <- read.csv('movies.csv', stringsAsFactors = FALSE)
 
 ```
 
