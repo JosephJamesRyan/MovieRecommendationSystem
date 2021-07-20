@@ -7,24 +7,245 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(reshape2)
+library(data.table)
+library(recommenderlab)
 ```
 
-## R Markdown
+```{r}
+# Reading the 2 datasets needed for this project in to R
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+ratings <- read.csv('/Users/josephryan/Desktop/R projects/Movie Recommendation /ratings.csv')
+movies <- read.csv('/Users/josephryan/Desktop/R projects/Movie Recommendation /movies.csv', stringsAsFactors = FALSE)
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
+```{r}
+# Some very basic EDA to get a better understanding of the data that I am working with
+head(ratings)
+str(ratings)
+summary(ratings)
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+head(movies)
+str(movies)
+summary(movies)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+# Looking at the structure of each dataset, we can see that some of the variables need some work in order to be more friendly to use.
+# We see that the 'genre' in the 'movies' dataframe is character type and therefore converting it into a more accessible format is a good idea
+
+# Creating a dataframe of the genre variable
+genre <- as.data.frame(movies$genres, stringsAsFactors = FALSE) 
+
+# Seperating the different movies genres
+genre1 <- as.data.frame(tstrsplit(genre[,1], '[|]', type.convert=TRUE), stringsAsFactors=FALSE) 
+colnames(genre1) <- c(1:10)  
+```
+
+```{r}
+# Creating a list of all genre types
+all_genres <- c("Action", "Adventure", "Animation", "Children", 
+                "Comedy", "Crime","Documentary", "Drama", "Fantasy",
+                "Film-Noir", "Horror", "Musical", "Mystery","Romance",
+                "Sci-Fi", "Thriller", "War", "Western") 
+
+genre_matrix <- matrix(0,10330,18)
+genre_matrix[1,] <- all_genres
+
+for(i in 1:nrow(genre1)){
+  for(col in 1:ncol(genre1)){
+    gen_col=which(genre_matrix[1,] == genre1[i,col])
+    genre_matrix[i+1,gen_col] <-1
+  }
+}
+```
+
+```{r}
+# We are removing row 1 as it is the categorical list of movie genre which we do not want
+genre_matrix1 <- as.data.frame(genre_matrix[-1,],stringsAsFactors = FALSE) 
+
+# We can see that the values within the matrix have different formats which will cause issues when trying to work with them
+str(genre_matrix1) 
+
+# Finally, we convert all the values within the matrix into integers
+for(col in 1:ncol(genre_matrix1)){
+  genre_matrix1[,col] <- as.integer(genre_matrix1[,col]) 
+}
+```
+
+```{r}
+combined_matrix <- cbind(movies[,1:2], genre_matrix1) #adding the updating matrix to the movie df instead of using the base 'genre' column
+
+## Creating a matrix of ratings
+head(ratings)
+
+rating_matrix <- reshape2::dcast(ratings, userId~movieId, value.var = 'rating', na.rm = FALSE)
+
+# Removing the uneeded userId's from this matrix
+rating_matrix <- as.matrix(rating_matrix[,-1]) 
+```
+
+```{r}
+# Using the library reccommender lab, we can convert the current matrix into a sparse matrix
+rating_matrix <- as(rating_matrix, "realRatingMatrix")
+
+recommendation_model <- recommenderRegistry$get_entries(dataType = "realRatingMatrix")
+head(names(recommendation_model))
+
+# Applying the description funcition to view the different reccommendations
+lapply(recommendation_model, "[[", "description") 
+
+# Chosing one of the models to use in our project (IBCF)
+recommendation_model$IBCF_realRatingMatrix$parameters 
+```
+
+```{r}
+similarity_matrix <- similarity(rating_matrix[1:4, ], method = "cosine", which = "users")
+# Converting the above into a matrix
+as.matrix(similarity_matrix) 
+image(as.matrix(similarity_matrix), main = 'Similarities between Users')
+
+
+movie_similarity_matrix <- similarity(rating_matrix[,1:4 ], method = "cosine", which = "items")
+# Converting the above into a matrix
+as.matrix(movie_similarity_matrix) 
+image(as.matrix(movie_similarity_matrix), main = 'Similarities between Movies')
+```
+
+```{r}
+rating_values <- as.vector(rating_matrix@data)
+# Collecting all of the unique ratings
+unique(rating_values) 
+
+ratings_table <- table(rating_values)
+# Showing the number of each of the different rating
+ratings_table 
+
+
+movie_views <- colCounts(rating_matrix)
+# Making a dataframe of the views
+views_df <- data.frame(movie = names(movie_views),views = movie_views) 
+
+#Sorting the table by the number of views
+views_df <- views_df[order(views_df$views, decreasing = TRUE), ] 
+views_df$title <- NA
+for(i in 1:10325){
+  views_df[i,3] <- as.character(subset(movies, movies$movieId == views_df[i,1])$title)
+}
+
+views_df[1:6, ]
+```
+
+```{r}
+## Creating a boxplot to visualise the count of views for each movie
+ggplot(views_df[1:6, ], aes(x = title, y = views)) +
+  geom_bar(stat="identity", fill = 'maroon', color = 'black') +
+    geom_text(aes(label = views), vjust = -0.3, size = 2) + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(title = "Total Number of Views on Top Movies", y = "Views", x = "Title") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+# Producing a heatmap of the first portion of our df
+image(rating_matrix[1:25, 1:25], axes = FALSE, main = "Heatmap of the first 25 rows and 25 columns")
+```
+
+```{r}
+# Creating a matrix of our ratings
+movie_ratings <- rating_matrix[rowCounts(rating_matrix)>50, colCounts(rating_matrix)>50]
+movie_ratings 
+# We can see from this that there are: 420 users|447 movies
+```
+
+```{r}
+# These next 3 plots are used to help understand the relationships between our differnt variables 
+min_movies <- quantile(rowCounts(movie_ratings), 0.98)
+min_users <- quantile(colCounts(movie_ratings), 0.98)
+
+image(movie_ratings[rowCounts(movie_ratings) > min_movies, colCounts(movie_ratings)> min_users], main = 'Top Users and Movies Heatmap')
+
+avg_ratings<- rowMeans(movie_ratings)
+qplot(avg_ratings, fill=I("pink"), col=I("black")) +
+  labs(title = "Distribution of Average Movie Rating per User", y = "Users", x = "Average Rating") + theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+normalised_ratings <- normalize(movie_ratings)
+sum(rowMeans(normalised_ratings)>0.00001)
+image(normalised_ratings[rowCounts(normalised_ratings)>min_movies, colCounts(normalised_ratings) > min_users], main = "Normalised Ratings of the Top Users")
+```
+
+```{r}
+# We are now at a comfortable stage where we are more or less happy with the format of the data, the last step is to split it into 2 binary categories; 0 and 1; 0 if the rating is below three and 1 if it is above three
+
+min_users_split <- quantile(colCounts(movie_ratings),0.95)
+min_movies_split <- quantile(rowCounts(movie_ratings),0.95)
+
+# Using a heatmap to visualise further relationship 
+high_rated_movies <- binarize(movie_ratings, minRating=3)
+image(high_rated_movies[rowCounts(movie_ratings)>min_movies_split,colCounts(movie_ratings)>min_users_split], main = "Top Movies and Users Heatmap")
+```
+
+```{r}
+# Now we can now construct the model that will act as the reccommendation system for the movies 
+
+# First, we will split the modified 'movie_ratings' dataset into a train and test set (80:20)
+
+sample_data<- sample(x = c(TRUE, FALSE),
+                      size = nrow(movie_ratings),
+                      replace = TRUE,
+                      prob = c(0.8, 0.2))
+train_data <- movie_ratings[sample_data, ]
+test_data <- movie_ratings[!sample_data, ]
+```
+
+```{r}
+## As the data has been split into a training and testing set, we can now focus on building the recommendation system
+
+recommendation_system <- recommenderRegistry$get_entries(dataType ="realRatingMatrix")
+recommendation_system$IBCF_realRatingMatrix$parameters
+
+recommend_model <- Recommender(data =train_data, method = 'IBCF', parameter = list(k=30))
+```
+
+```{r}
+about_model <- getModel(recommend_model)
+class(about_model$sim)
+dim(about_model$sim)
+```
+```{r}
+top_items <- 20
+image(about_model$sim[1:top_items,1:top_items], main = 'First row and first column Heatmap') 
+```
+
+```{r}
+row_sums <- rowSums(about_model$sim>0)
+col_sums <- colSums(about_model$sim>0)
+
+qplot(col_sums, fill=I("red"), col=I("black"))+ ggtitle("The Distribution of Column Count") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+top_recommendations <- 10
+pred_reccommendations <- predict(object = recommend_model, newdata = test_data, n = top_recommendations)
+pred_reccommendations
+
+# First user recommendation
+first_user <- pred_reccommendations@items[[1]] 
+movies_user1 <- pred_reccommendations@itemLabels[first_user]
+movies_user2 <- movies_user1
+```
+
+```{r}
+for(i in 1:10){
+  movies_user2[i]<-as.character(subset(movies,movies$movieId==movies_user1[i])$title)
+  
+}
+```
+
+```{r}
+recommendation_matrix <- sapply(pred_reccommendations@items,function(x){as.integer(colnames(movie_ratings)[x])})
+
+recommendation_matrix[,1:4]
+```
